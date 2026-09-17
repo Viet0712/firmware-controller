@@ -11,7 +11,7 @@
 #define R_EN_R 41  //VAng
 #define L_EN_R 42  //luc
 
-//motor rightoooii
+//motor right
 #define RPWM_L 16  // Lam
 #define LPWM_L 18  // Tim
 #define R_EN_L 17  //VAng
