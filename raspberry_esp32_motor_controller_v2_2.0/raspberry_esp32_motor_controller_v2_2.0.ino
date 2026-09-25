@@ -14,18 +14,20 @@
 // | Phai   | L_EN      | GPIO 42    | Luc (xanh la)  | Luon HIGH  |
 //
 // ENCODER (A = Vang, B = Xanh) - tat ca INPUT_PULLUP
-// | Vi tri | Encoder      | Kenh | Chan ESP32 | Mau day | Vai tro trong code            |
-// |--------|--------------|------|------------|---------|-------------------------------|
-// | Trai   | Encoder trai | C2   | GPIO 9     | Vang    | Ngat RISING -> encoderISRL    |
-// | Trai   | Encoder trai | C1   | GPIO 10    | Xanh la | Doc chieu quay trong ISR trai |
-// | Phai   | Encoder phai | C2   | GPIO 11    | Vang    | Doc chieu quay trong ISR phai |
-// | Phai   | Encoder phai | C1   | GPIO 12    | Xanh la | Ngat RISING -> encoderISRR    |
+// | Vi tri | Encoder      | Kenh | Chan ESP32 | Mau day | Vai tro trong code              |
+// |--------|--------------|------|------------|---------|---------------------------------|
+// | Trai   | Encoder trai | C2   | GPIO 11    | Vang    | Doc chieu quay trong ISR trai   |
+// | Trai   | Encoder trai | C1   | GPIO 12    | Xanh la | Ngat RISING -> encoderISR_Left  |
+// | Phai   | Encoder phai | C2   | GPIO 9     | Vang    | Ngat RISING -> encoderISR_Right |
+// | Phai   | Encoder phai | C1   | GPIO 10    | Xanh la | Doc chieu quay trong ISR phai   |
 //
 // LUU Y:
-// - Trai va phai dau nguoc pha: trai ngat tren day Vang, phai ngat tren day Xanh.
-//   Khi dau lai day phai giu dung nhu bang tren.
-// - Encoder trai (GPIO 9/10) dem vao encoderCountLeft  -> encoder_l -> "rev_left".
-//   Encoder phai (GPIO 11/12) dem vao encoderCountRight -> encoder_r -> "rev_right".
+// - Trai va phai dau nguoc pha: phai ngat tren day Vang (GPIO 9),
+//   trai ngat tren day Xanh (GPIO 12). Khi dau lai day phai giu dung nhu bang tren.
+// - Encoder trai (GPIO 11/12) dem vao encoderCountLeft  -> encoder_l -> "rev_left".
+//   Encoder phai (GPIO 9/10)  dem vao encoderCountRight -> encoder_r -> "rev_right".
+// - Truoc day cap chan 9/10 bi gan nham cho banh trai. Sai nay lam dao dau van toc
+//   goc cua odometry va lam PID cua moi dong co bam vao encoder cua banh ben kia.
 //
 // GIAO THUC SERIAL 115200 (JSON mot dong, ket thuc bang '\n'):
 // - ESP32 -> Raspberry, moi 50 ms:
@@ -69,25 +71,27 @@ volatile long encoderCountRightPID_prev = 0;
 volatile long encoderCountLeftPID_prev = 0;
 int a = 5;
 //A la Vàng B la Xanh
-void IRAM_ATTR encoderISRL() {
+// Encoder banh PHAI: ngat tren GPIO 9 (vang = A), doc GPIO 10 (xanh = B).
+void IRAM_ATTR encoderISR_Right() {
   int b = digitalRead(10);
-  if (b == HIGH) {
-    encoderCountLeft++;
-    encoderCountLeftPID++;
-  } else {
-    encoderCountLeft--;
-    encoderCountLeftPID--;
-  }
-}
-
-void IRAM_ATTR encoderISRR() {
-  int b = digitalRead(11);
   if (b == HIGH) {
     encoderCountRight++;
     encoderCountRightPID++;
   } else {
     encoderCountRight--;
     encoderCountRightPID--;
+  }
+}
+
+// Encoder banh TRAI: ngat tren GPIO 12 (xanh = B), doc GPIO 11 (vang = A).
+void IRAM_ATTR encoderISR_Left() {
+  int b = digitalRead(11);
+  if (b == HIGH) {
+    encoderCountLeft++;
+    encoderCountLeftPID++;
+  } else {
+    encoderCountLeft--;
+    encoderCountLeftPID--;
   }
 }
 double Input_L;     // giá trị đo được (vd: tốc độ encoder)
@@ -113,18 +117,18 @@ void setup() {
   Serial.print("start");
   // motor
   // -- encoder
-  pinMode(9, INPUT_PULLUP);   // encoder trai - vang    - C2
-  pinMode(10, INPUT_PULLUP);  // encoder trai - xanh la - C1
-  pinMode(11, INPUT_PULLUP);  // encoder phai - vang    - C2
-  pinMode(12, INPUT_PULLUP);  // encoder phai - xanh la - C1
+  pinMode(9, INPUT_PULLUP);   // encoder phai - vang    - C2
+  pinMode(10, INPUT_PULLUP);  // encoder phai - xanh la - C1
+  pinMode(11, INPUT_PULLUP);  // encoder trai - vang    - C2
+  pinMode(12, INPUT_PULLUP);  // encoder trai - xanh la - C1
 
   attachInterrupt(
     digitalPinToInterrupt(9),
-    encoderISRL,
+    encoderISR_Right,
     RISING);
   attachInterrupt(
     digitalPinToInterrupt(12),
-    encoderISRR,
+    encoderISR_Left,
     RISING);
   //--
   pinMode(R_EN_L, OUTPUT);
