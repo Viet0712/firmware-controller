@@ -1,3 +1,40 @@
+// ============================================================================
+// BANG THONG KE DI DAY (ESP32-S3 <-> Driver dong co / Encoder)
+// ----------------------------------------------------------------------------
+// DRIVER DONG CO (BTS7960 hoac tuong duong)
+// | Vi tri | Chuc nang | Chan ESP32 | Mau day        | Kenh PWM   |
+// |--------|-----------|------------|----------------|------------|
+// | Trai   | RPWM      | GPIO 16    | Lam (xanh duong)| LEDC 0    |
+// | Trai   | LPWM      | GPIO 18    | Tim            | LEDC 1     |
+// | Trai   | R_EN      | GPIO 17    | Vang           | Luon HIGH  |
+// | Trai   | L_EN      | GPIO 15    | Luc (xanh la)  | Luon HIGH  |
+// | Phai   | RPWM      | GPIO 39    | Lam (xanh duong)| LEDC 2    |
+// | Phai   | LPWM      | GPIO 40    | Tim            | LEDC 3     |
+// | Phai   | R_EN      | GPIO 41    | Vang           | Luon HIGH  |
+// | Phai   | L_EN      | GPIO 42    | Luc (xanh la)  | Luon HIGH  |
+//
+// ENCODER (A = Vang, B = Xanh) - tat ca INPUT_PULLUP
+// | Vi tri | Encoder      | Kenh | Chan ESP32 | Mau day | Vai tro trong code            |
+// |--------|--------------|------|------------|---------|-------------------------------|
+// | Trai   | Encoder trai | C2   | GPIO 9     | Vang    | Ngat RISING -> encoderISRL    |
+// | Trai   | Encoder trai | C1   | GPIO 10    | Xanh la | Doc chieu quay trong ISR trai |
+// | Phai   | Encoder phai | C2   | GPIO 11    | Vang    | Doc chieu quay trong ISR phai |
+// | Phai   | Encoder phai | C1   | GPIO 12    | Xanh la | Ngat RISING -> encoderISRR    |
+//
+// LUU Y:
+// - Trai va phai dau nguoc pha: trai ngat tren day Vang, phai ngat tren day Xanh.
+//   Khi dau lai day phai giu dung nhu bang tren.
+// - Encoder trai (GPIO 9/10) dem vao encoderCountLeft  -> encoder_l -> "rev_left".
+//   Encoder phai (GPIO 11/12) dem vao encoderCountRight -> encoder_r -> "rev_right".
+//
+// GIAO THUC SERIAL 115200 (JSON mot dong, ket thuc bang '\n'):
+// - ESP32 -> Raspberry, moi 50 ms:
+//     {"rev_left": <so vong>, "rev_right": <so vong>}
+//   Gia tri la SO VONG quay duoc trong chu ky, khong phai rps.
+//   Phia Raspberry chia cho dt de ra vong/giay.
+// - Raspberry -> ESP32: {"v_left": <rps>, "v_right": <rps>, "ts": <ns>}
+//   Truong "ts" hien khong duoc dung o firmware.
+// ============================================================================
 // ESP32-S3 LiDAR + Encoder streaming over UDP at 500us intervals
 // final version
 #include <WiFi.h>
@@ -22,35 +59,35 @@ struct PIDOutput {
   int pwm;
   int direction;
 };
-volatile long encoderCountMotor1 = 0;
-volatile long encoderCountMotor2 = 0;
+volatile long encoderCountRight = 0;
+volatile long encoderCountLeft = 0;
 
-volatile long encoderCountMotor1PID = 0;
-volatile long encoderCountMotor2PID = 0;
+volatile long encoderCountRightPID = 0;
+volatile long encoderCountLeftPID = 0;
 
-volatile long encoderCountMotor1PID_prev = 0;
-volatile long encoderCountMotor2PID_prev = 0;
+volatile long encoderCountRightPID_prev = 0;
+volatile long encoderCountLeftPID_prev = 0;
 int a = 5;
 //A la Vàng B la Xanh
 void IRAM_ATTR encoderISRL() {
   int b = digitalRead(10);
   if (b == HIGH) {
-    encoderCountMotor2++;
-    encoderCountMotor2PID++;
+    encoderCountLeft++;
+    encoderCountLeftPID++;
   } else {
-    encoderCountMotor2--;
-    encoderCountMotor2PID--;
+    encoderCountLeft--;
+    encoderCountLeftPID--;
   }
 }
 
 void IRAM_ATTR encoderISRR() {
   int b = digitalRead(11);
   if (b == HIGH) {
-    encoderCountMotor1++;
-    encoderCountMotor1PID++;
+    encoderCountRight++;
+    encoderCountRightPID++;
   } else {
-    encoderCountMotor1--;
-    encoderCountMotor1PID--;
+    encoderCountRight--;
+    encoderCountRightPID--;
   }
 }
 double Input_L;     // giá trị đo được (vd: tốc độ encoder)
@@ -76,10 +113,10 @@ void setup() {
   Serial.print("start");
   // motor
   // -- encoder
-  pinMode(9, INPUT_PULLUP);   //1 vang C2
-  pinMode(10, INPUT_PULLUP);  //1 xanh la C1
-  pinMode(11, INPUT_PULLUP);  //2 vang C2
-  pinMode(12, INPUT_PULLUP);  //2 xanh la C1
+  pinMode(9, INPUT_PULLUP);   // encoder trai - vang    - C2
+  pinMode(10, INPUT_PULLUP);  // encoder trai - xanh la - C1
+  pinMode(11, INPUT_PULLUP);  // encoder phai - vang    - C2
+  pinMode(12, INPUT_PULLUP);  // encoder phai - xanh la - C1
 
   attachInterrupt(
     digitalPinToInterrupt(9),
@@ -332,12 +369,12 @@ void loop() {
   //   }
   //   dt = (now - last) / 1000.0f;
   //   last = now;
-  //   encoder_r = encoderCountMotor1PID - encoderCountMotor1PID_prev;
-  //   encoder_l = encoderCountMotor2PID - encoderCountMotor2PID_prev;
+  //   encoder_r = encoderCountRightPID - encoderCountRightPID_prev;
+  //   encoder_l = encoderCountLeftPID - encoderCountLeftPID_prev;
   //   lastEncoderTime = now;
   //   StaticJsonDocument<64> doc;
-  //   doc["motor1"] = (float)encoder_r / CPR;
-  //   doc["motor2"] = (float)encoder_l / CPR;
+  //   doc["rev_left"] = (float)encoder_l / CPR;
+  //   doc["rev_right"] = (float)encoder_r / CPR;
   //   serializeJson(doc, Serial);
   //   Serial.println();
   //   // Serial.println(String("Motor R: ") + String((float)encoder_r / CPR) + "\tMotor L: " + String((float)encoder_l / CPR));
@@ -353,8 +390,8 @@ void loop() {
 
 
   //   // Serial.println(String("Motor R_pid: ") + String(rpsr_md) + "\tMotor L_pid: " + String(rpsl_md));
-  //   // encoderCountMotor1 = 0;
-  //   // encoderCountMotor2 = 0;
+  //   // encoderCountRight = 0;
+  //   // encoderCountLeft = 0;
   //   // float encoder_L_tg = getTargetEncoder(0.5);
   //   // float encoder_r_tg = getTargetEncoder(0.5);
   //   // // Serial.println(String("Motor R_tg: ") + String((float)encoder_r_tg) + "\tMotor L_tg: " + String((float)encoder_L_tg));
@@ -362,8 +399,8 @@ void loop() {
   //   // float v_actual_l = getReal_v(encoder_l);
   //   // float v_actual_r = getReal_v(encoder_r);
   //   // Serial.println(String("v R_: ") + String((float)v_actual_r) + "\tv L_: " + String((float)v_actual_l));
-  //   encoderCountMotor1PID_prev = encoderCountMotor1PID;
-  //   encoderCountMotor2PID_prev = encoderCountMotor2PID;
+  //   encoderCountRightPID_prev = encoderCountRightPID;
+  //   encoderCountLeftPID_prev = encoderCountLeftPID;
   // }
   if (millis() - lastEncoderTime >= encoderInterval) {
     static unsigned long last = 0;
@@ -379,15 +416,16 @@ void loop() {
     lastEncoderTime = now;
 
     noInterrupts();
-    long enc1_now = encoderCountMotor1PID;
-    long enc2_now = encoderCountMotor2PID;
+    long encRight_now = encoderCountRightPID;
+    long encLeft_now = encoderCountLeftPID;
     interrupts();
 
-    encoder_r = enc1_now - encoderCountMotor1PID_prev;
-    encoder_l = enc2_now - encoderCountMotor2PID_prev;
+    encoder_r = encRight_now - encoderCountRightPID_prev;
+    encoder_l = encLeft_now - encoderCountLeftPID_prev;
+    // So vong quay trong chu ky nay (khong phai rps).
     StaticJsonDocument<64> doc;
-    doc["motor1"] = (float)encoder_r / CPR;
-    doc["motor2"] = (float)encoder_l / CPR;
+    doc["rev_left"] = (float)encoder_l / CPR;
+    doc["rev_right"] = (float)encoder_r / CPR;
     serializeJson(doc, Serial);
     Serial.println();
 
@@ -399,8 +437,8 @@ void loop() {
 
     setWheelRps(v_left, v_right);
 
-    encoderCountMotor1PID_prev = enc1_now;
-    encoderCountMotor2PID_prev = enc2_now;
+    encoderCountRightPID_prev = encRight_now;
+    encoderCountLeftPID_prev = encLeft_now;
   }
   static String line;
   while (Serial.available()) {
